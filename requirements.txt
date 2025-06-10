@@ -1,0 +1,9 @@
+conda create <your env> python=3.10
+conda activate <your env>
+conda install pytorch==2.3.1 pytorch-cuda=12.1 -c pytorch -c nvidia # Other versions should also work.
+pip install jupyter
+pip install bitsandbytes accelerate
+pip install matplotlib
+pip install tqdm
+pip install numpy
+pip install datasets
