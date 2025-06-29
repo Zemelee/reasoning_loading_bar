@@ -1,22 +1,7 @@
-# This software is for non-commercial use only.
-# Commercial use requires a separate license.
-
 from datasets import load_dataset
 
-
+# 从指定数据集加载一定数量的问题，可指定起始索引
 def load_problems(dataset, starting_index=None, end_index=None):
-    """
-    Load a specified number of problems from a dataset starting from a given index.
-    
-    Args:
-        dataset (str): The name of the dataset to load.
-        starting_index (int): The index to start loading problems from.
-        num_problems (int): The number of problems to load.
-        
-    Returns:
-        list: A list of problems loaded from the dataset.
-    """
-    # Load the dataset
     if dataset == "math500":
         if starting_index is None:
             starting_index = 30
@@ -32,6 +17,6 @@ def load_problems(dataset, starting_index=None, end_index=None):
         problems = load_dataset("openai/gsm8k", "main")["train"]["question"][starting_index:end_index]
 
     else:
-        raise ValueError("Unsupported dataset. Please use 'math500' or 'gsm8k'.")
+        raise ValueError("不支持的数据集。请使用'math500'或'gsm8k'。")
     
     return problems
