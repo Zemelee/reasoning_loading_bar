@@ -30,7 +30,7 @@ def generate_batch_with_last_hidden_states(
     start_time = time.time()
     # 生成文本
     outputs = model.generate(
-        input_ids,
+        input_ids,  # 会被padding 填充到相同长度
         attention_mask=attention_mask,
         temperature=temperature,
         max_new_tokens=max_new_tokens,
@@ -52,7 +52,7 @@ def generate_batch_with_last_hidden_states(
     # 提取输入提示（prompt）中最后一个 token 的隐藏状态hidden_states，作为该 prompt 的语义表示
     # hidden_states.shape = [num_return_seq(4), seq_len(prompt_token长度), hidden_size]
     # 最后一层的隐藏状态通常用于预测下一个 token
-
+    # [0]--> prompt（初始输入）的隐藏状态； [-1]--> 最后一层的隐藏状态
     prompt_last_layer_hs_batch = outputs.hidden_states[0][-1]
     last_layer_hidden_states_input_list = [
         # detach将张量从计算图分离(不参与微分)
@@ -120,32 +120,29 @@ def generate_batch_with_last_hidden_states(
     return (
         all_responses,  # 文本答案 * k
         all_tokens_lists,  # tokens词 * k
-        last_layer_hidden_states_input_list,  # outputs.hidden_states[0][-1] * k
+        last_layer_hidden_states_input_list,  # prompt 的隐藏状态 * k
         last_layer_hidden_states_output_list,  # 每个生成 token 的最后一层隐藏状态 * k
         actual_lengths_generated_list,  # 实际生成的 token 数量 * k
         generation_time,  # 耗时 * k
     )
 
 
-
-
-
-
-# Example usage:
 if __name__ == "__main__":
-    model_name="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
-    max_new_tokens=1024,
+    # deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+    # deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+    model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    max_new_tokens = 1024
     # 数据集
-    dataset="math500",  # math500 or gsm8k
-    start_problem_index=0,
-    end_problem_index=4,
-    gens_per_p=3,
-    output_dir="llama_model_results_batched",
-    prompt_template="{problem}\nPlease reason step by step, and put your final answer within \\boxed{{}}.\n<think>\n",
-    temperature=0.6,
-    do_sample=True,  #
-    top_p=0.95,
-    seed=42,
+    dataset = "math500"  # math500 or gsm8k
+    start_problem_index = 0
+    end_problem_index = 5
+    gens_per_p = 3
+    output_dir = "llama_model_results_batched"
+    prompt_template = "{problem}\nPlease reason step by step, and put your final answer within \\boxed{{}}.\n<think>\n"
+    temperature = 0.6
+    do_sample = True
+    top_p = 0.95
+    seed = 42
     results = {
         "config": {
             "model_name": model_name,
@@ -168,16 +165,13 @@ if __name__ == "__main__":
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)  # Sets seed for all GPUs
         print(f"[INFO] Seeds set to {seed} for random, numpy, and torch.")
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    # Set memory-efficient configuration
     if device == "cuda":
         torch.cuda.empty_cache()
+        # 可以将多个小块显存合并使用
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    # Model loading
-    print(f"Loading model {model_name} and tokenizer...")
+    print(f"正在加载 {model_name} 和 tokenizer...")
     if device == "cuda":
         for i in range(torch.cuda.device_count()):
             print(f"Device {i}: {torch.cuda.get_device_name(i)}")
@@ -192,7 +186,7 @@ if __name__ == "__main__":
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        device_map="auto",  # Distributes model across available GPUs/CPU
+        device_map="auto",
         torch_dtype=torch.float16,
     )
 
@@ -204,7 +198,7 @@ if __name__ == "__main__":
         # 此处暂时假设之后可以通过 outputs.hidden_states[0][-1].shape[-1] 获取
 
     # Load dataset
-    print(f"Loading dataset {dataset}")
+    print(f"正在加载数据集 {dataset} ...")
     problems = load_problems(
         dataset, starting_index=start_problem_index, end_index=end_problem_index
     )
@@ -218,7 +212,8 @@ if __name__ == "__main__":
     # 对于数据集的每个问题
     for problem_idx, problem_text_content in enumerate(problems):
         actual_idx = problem_idx + start_problem_index
-        print(f"\nProcessing problem {actual_idx}...")
+        print(f"\n正在处理问题 {actual_idx}...")
+
         problem_dir = os.path.join(output_dir, f"problem_{actual_idx}")
         os.makedirs(problem_dir, exist_ok=True)
         p_res_entry = {
@@ -238,14 +233,12 @@ if __name__ == "__main__":
 
         inputs = tokenizer(formatted_problem, return_tensors="pt").to(device)
         try:
-            # Generate all sequences for this problem in one batch
-            print(
-                f"Generating {gens_per_p} sequences for problem {actual_idx} in a batch..."
-            )
+            print(f"为问题 {actual_idx} 生成 {gens_per_p} 个序列 ...")
+            # 生成问题的答案序列，并提取prompt和生成输出部分每个 token 的最后一层隐藏状态
             (
                 all_responses,  # 文本答案 * k
                 all_tokens_lists,  # tokens词 * k
-                all_hs_inputs,  # outputs.hidden_states[0][-1] * k
+                all_hs_inputs,  # prompt 的隐藏状态 * k
                 all_hs_outputs,  # 每个生成 token 的最后一层隐藏状态 * k
                 all_actual_lengths,  # 实际生成的 token 数量 * k
                 batch_generation_time,  # 耗时 * k
@@ -253,23 +246,20 @@ if __name__ == "__main__":
                 model,
                 inputs,
                 tokenizer,
-                num_return_sequences=gens_per_p, # k
+                num_return_sequences=gens_per_p,  # k
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 do_sample=do_sample,
                 top_p=top_p,
             )
 
-            print(
-                f"Batch generation for problem {actual_idx} completed in {batch_generation_time:.2f} seconds."
-            )
-
-            # 处理batch中的每个生成
+            print(f"问题 {actual_idx} 批量生成完成({batch_generation_time:.2f}s).")
+            # 处理 batch 中的每个生成
             for gen_idx in range(gens_per_p):
                 gen_dir = os.path.join(problem_dir, f"generation_{gen_idx}")
                 os.makedirs(gen_dir, exist_ok=True)
 
-                # Ensure lists have enough elements if generation was partial (shouldn't happen with num_return_sequences)
+                # 可能的错误检测
                 if gen_idx >= len(all_responses):
                     print(
                         f"[Warning] Problem {actual_idx}, gen {gen_idx}: Expected generation not found in batch output. Skipping."
@@ -283,13 +273,15 @@ if __name__ == "__main__":
                     p_res_entry["generations"][gen_idx] = error_info
                     continue
 
-                current_response = all_responses[gen_idx] # 第k个文本答案
-                current_tokens_list = all_tokens_lists[gen_idx] # 第k个tokens
-                current_hs_input = all_hs_inputs[gen_idx] # 第k个最后一层的提示词隐藏状态
-                current_hs_output = all_hs_outputs[gen_idx] # 第k个最后一层的生成
-                current_actual_generated_len = all_actual_lengths[gen_idx] # 第k个实际生成的token长度
+                current_response = all_responses[gen_idx]  # 第k个文本答案
+                current_tokens_list = all_tokens_lists[gen_idx]  # 第k个tokens
+                # prompt 的隐藏状态
+                current_hs_input = all_hs_inputs[gen_idx]
+                current_hs_output = all_hs_outputs[gen_idx]  # 第k个 最后一层的生成
+                # 第k个实际生成的token长度
+                current_actual_generated_len = all_actual_lengths[gen_idx]
 
-                generation_files = {
+                gen_files = {
                     "response_path": os.path.join(gen_dir, "response.txt"),
                     "metadata_path": os.path.join(gen_dir, "metadata.json"),
                     "tokens_path": os.path.join(gen_dir, "tokens.json"),
@@ -300,25 +292,16 @@ if __name__ == "__main__":
                         gen_dir, "token_hidden_states_output.npy"
                     ),
                 }
-
                 try:
-                    with open(
-                        generation_files["response_path"], "w", encoding="utf-8"
-                    ) as f:
+                    # 记录生成的结果和token序列
+                    with open(gen_files["response_path"], "w", encoding="utf-8") as f:
                         f.write(current_response)
-
-                    with open(
-                        generation_files["tokens_path"], "w", encoding="utf-8"
-                    ) as f:
+                    with open(gen_files["tokens_path"], "w", encoding="utf-8") as f:
                         json.dump(current_tokens_list, f, indent=2)
-
-                    np.save(
-                        generation_files["hidden_states_input_path"], current_hs_input
-                    )
-                    np.save(
-                        generation_files["hidden_states_output_path"], current_hs_output
-                    )
-
+                    # 保存输入和输出的最后一层隐藏状态
+                    np.save(gen_files["hidden_states_input_path"], current_hs_input)
+                    np.save(gen_files["hidden_states_output_path"], current_hs_output)
+                    # metadata: 生成时间、prompt_token数、输出长度等
                     metadata = {
                         "batch_generation_time_seconds_for_problem": batch_generation_time,
                         "estimated_time_per_generation_in_batch": (
@@ -328,21 +311,17 @@ if __name__ == "__main__":
                         ),
                         "input_prompt_length_tokens": inputs["input_ids"].shape[1],
                         "output_generated_length_tokens": current_actual_generated_len,
-                        "total_tokens_in_sequence_file": len(
-                            current_tokens_list
-                        ),  # Includes prompt, generated, EOS, padding
+                        "total_tokens_in_sequence_file": len(current_tokens_list),
                         "prompt_plus_output_tokens": inputs["input_ids"].shape[1]
                         + current_actual_generated_len,
                     }
-                    with open(generation_files["metadata_path"], "w") as f:
+                    with open(gen_files["metadata_path"], "w") as f:
                         json.dump(metadata, f, indent=2)
 
-                    print(
-                        f"  Saved results for problem {actual_idx}, generation {gen_idx} to {gen_dir}"
-                    )
+                    print(f"问题{actual_idx} 保存成功, 在 {gen_dir} 生成 {gen_idx}")
                     # Add metadata dict to files dict
-                    generation_files["metadata"] = metadata
-                    p_res_entry["generations"][gen_idx] = generation_files
+                    gen_files["metadata"] = metadata
+                    p_res_entry["generations"][gen_idx] = gen_files
 
                 except Exception as e_gen_save:
                     print(f"保存{actual_idx}结果出现错误, 生成 {gen_idx}: {e_gen_save}")
@@ -383,4 +362,3 @@ if __name__ == "__main__":
     with open(final_summary_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Full results summary saved to {final_summary_path}")
-
