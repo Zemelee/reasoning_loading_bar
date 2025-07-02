@@ -43,17 +43,12 @@ def generate_batch_with_last_hidden_states(
     )
     generation_time = time.time() - start_time
 
-    #  [(layer_0_hs_prompt, layer_1_hs_prompt, ..., layer_n_hs_prompt),   # 第 0 步（prompt）
-    #  (layer_0_hs_step1, layer_1_hs_step1, ..., layer_n_hs_step1),     # 第 1 步（生成第一个 token）
-    #  (layer_0_hs_step2, layer_1_hs_step2, ..., layer_n_hs_step2),     # 第 2 步（生成第二个 token）
-    # 每一个元素对应生成过程中的一个 token 步骤（包括 prompt）
-    # 每个步骤的 hidden states 是一个 tuple
-    # 其中 layer_n_hs.shape: (batch_size, seq_len, hidden_size)
-    # 提取输入提示（prompt）中最后一个 token 的隐藏状态hidden_states，作为该 prompt 的语义表示
     # hidden_states.shape = [num_return_seq(4), seq_len(prompt_token长度), hidden_size]
     # 最后一层的隐藏状态通常用于预测下一个 token
     # [0]--> prompt（初始输入）的隐藏状态； [-1]--> 最后一层的隐藏状态
+    # torch.Size([1*num_seq, promp_len, 4096])
     prompt_last_layer_hs_batch = outputs.hidden_states[0][-1]
+
     last_layer_hidden_states_input_list = [
         # detach将张量从计算图分离(不参与微分)
         prompt_last_layer_hs_batch[k].detach().cpu().numpy()
@@ -61,8 +56,8 @@ def generate_batch_with_last_hidden_states(
     ]
 
     last_layer_hidden_states_output_list = []
-    prompt_len = input_ids.shape[1]  # (batch_size, seq_len)
-
+    prompt_len = input_ids.shape[1]  # (batch_size=1*num_seq, seq_len=24?)
+    # 获取模型隐藏状态维度 4096
     model_hidden_size = getattr(model.config, "hidden_size", None)
     if model_hidden_size is None and outputs.hidden_states and outputs.hidden_states[0]:
         model_hidden_size = outputs.hidden_states[0][-1].shape[-1]
@@ -78,15 +73,13 @@ def generate_batch_with_last_hidden_states(
         # 解码第k个答案
         response_k = tokenizer.decode(current_sequence_ids_k, skip_special_tokens=True)
         all_responses.append(response_k)
-
         # 答案 转 token词
         tokens_k_full_sequence = tokenizer.convert_ids_to_tokens(current_sequence_ids_k)
         all_tokens_lists.append(tokens_k_full_sequence)
-
         # 确定为序列k生成的令牌的实际数量（不包括提示和填充）
         sequence_k_generated_ids_only = current_sequence_ids_k[prompt_len:]
         # 计算每个生成序列中实际有效的 token 数量
-        actual_gen_len_k = 0  # 实际生成的 token 数量
+        actual_gen_len_k = 0  # 实际生成的 token 数量  1147
         for token_id in sequence_k_generated_ids_only:
             if token_id == tokenizer.pad_token_id:
                 break
@@ -97,14 +90,15 @@ def generate_batch_with_last_hidden_states(
 
         # 存储k序列中 tokens 的最后一层隐藏状态
         gen_k_output_hs_for_actual_tokens = []
-        # 可用的隐藏状态步骤数量
+        # 可用的隐藏状态步骤数量 2048
         num_hs_steps_available_for_gen_tokens = len(outputs.hidden_states)
         # 提取每个生成 token 的最后一层隐藏状态
         for step_offset in range(
             min(actual_gen_len_k, num_hs_steps_available_for_gen_tokens)
         ):
+            # (batch_size*num_return, seq_len_at_this_step, hidden_size)
+            # 1*生成数量，当前时刻的token长度，隐藏状态维度
             hs_tensor_for_step = outputs.hidden_states[step_offset][-1]
-            # 选择第 k 个序列的第 0 个位置的隐藏状态
             token_hs = hs_tensor_for_step[k, 0, :].detach().cpu().numpy()
             gen_k_output_hs_for_actual_tokens.append(token_hs)
 
@@ -112,7 +106,7 @@ def generate_batch_with_last_hidden_states(
             last_layer_hidden_states_output_list.append(
                 np.array(gen_k_output_hs_for_actual_tokens)
             )
-        else:  # Handle cases where actual_gen_len_k is 0
+        else:  # 空处理
             last_layer_hidden_states_output_list.append(
                 np.empty((0, model_hidden_size), dtype=np.float32)
             )
@@ -130,12 +124,12 @@ def generate_batch_with_last_hidden_states(
 if __name__ == "__main__":
     # deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
     # deepseek-ai/DeepSeek-R1-Distill-Llama-8B
-    model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
-    max_new_tokens = 1024
+    model_name = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+    max_new_tokens = 2048
     # 数据集
     dataset = "math500"  # math500 or gsm8k
-    start_problem_index = 0
-    end_problem_index = 5
+    start_problem_index = 16
+    end_problem_index = 17
     gens_per_p = 3
     output_dir = "llama_model_results_batched"
     prompt_template = "{problem}\nPlease reason step by step, and put your final answer within \\boxed{{}}.\n<think>\n"

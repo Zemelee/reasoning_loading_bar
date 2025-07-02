@@ -23,7 +23,7 @@ def load_datasets(dataset_dir):
 
 # 将隐藏状态和标签 转换为 PyTorch 张量
 def prepare_tensors(dataset, device="cpu"):
-    hidden_states = [item[0] for item in dataset]
+    hidden_states = [item[0] for item in dataset] # 数据集的长度，每一个样本的长度为4096
     labels = [item[1] for item in dataset]
     H = torch.tensor(np.array(hidden_states), dtype=torch.float32, device=device)
     y = torch.tensor(np.array(labels), dtype=torch.float32, device=device).reshape(
@@ -38,7 +38,8 @@ def fit_linear_regression(H, y, epsilon=1e-10):
     reg_term = epsilon * torch.eye(H.shape[1], device=H.device)
     # 求解正规方程组: w = (H^T H + ε*I)^(-1) H^T y
     w = torch.linalg.solve(H_transpose @ H + reg_term, H_transpose @ y).squeeze()
-    return w
+    return w # torch.Size([4096])
+
 
 
 def predict(H, w):
@@ -120,7 +121,7 @@ if __name__ == "__main__":
     print("Preparing tensors...")
     H_train, y_train = prepare_tensors(train_dataset, device)
     H_test, y_test = prepare_tensors(test_dataset, device)
-    print(f"Hidden state dimension: {H_train.shape[1]}")
+    print(f"Hidden state dimension: {H_train.shape[1]}") # 4096
     print("Training linear regressor...")
     weights = fit_linear_regression(H_train, y_train, epsilon=args.epsilon)
     # Make predictions
