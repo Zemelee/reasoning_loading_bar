@@ -128,8 +128,8 @@ if __name__ == "__main__":
     max_new_tokens = 2048
     # 数据集
     dataset = "math500"  # math500 or gsm8k
-    start_problem_index = 16
-    end_problem_index = 17
+    start_problem_index = 1
+    end_problem_index = 5
     gens_per_p = 3
     output_dir = "llama_model_results_batched"
     prompt_template = "{problem}\nPlease reason step by step, and put your final answer within \\boxed{{}}.\n<think>\n"
